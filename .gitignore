@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Backup files
+*.bak
+
+# IDE & OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
