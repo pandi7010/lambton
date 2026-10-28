@@ -30,6 +30,7 @@
 */
 
 #include <Arduino.h>
+#include "driver/gpio.h"
 
 // User-Specified ESP32 Pin Configuration
 constexpr uint8_t DATA_PIN = 13;   // ESP32 GPIO 13 -> 74HC595 Pin 14 (SER)
@@ -46,17 +47,30 @@ uint32_t onSince[NUM_CHANNELS + 1] = {0};
 bool watchdogEnabled = false;        // Default to continuous hold for testing
 constexpr uint16_t WATCHDOG_MS = 250;
 
-// Shift out bits with microsecond setup and pulse times to guarantee signal integrity
-// across ESP32 240MHz GPIO slew rate and bus capacitance across 8 ICs.
+// Shift out bits with paced microsecond setup and pulse shaping.
+// Immediately returns data to LOW while clock is held HIGH so high-speed
+// clock edge reflections/ringing can NEVER clock in extra adjacent '1' bits.
 void customShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t val) {
   for (uint8_t i = 0; i < 8; ++i) {
     bool bitVal = (bitOrder == LSBFIRST) ? (val & (1 << i)) : (val & (1 << (7 - i)));
+    
+    // 1. Assert data and allow setup time
     digitalWrite(dataPin, bitVal ? HIGH : LOW);
-    delayMicroseconds(10); // Generous data setup time
+    delayMicroseconds(10);
+    
+    // 2. Rising clock edge latches the data bit into the shift register
     digitalWrite(clockPin, HIGH);
-    delayMicroseconds(12); // Clean clock pulse width
+    delayMicroseconds(12);
+    
+    // 3. Clear data line back to LOW while clock is still HIGH.
+    // 74HC595 data hold time is <5ns; clearing to LOW guarantees that
+    // any ringing/bouncing on the clock line or falling edge can NEVER clock another 1!
+    digitalWrite(dataPin, LOW);
+    delayMicroseconds(5);
+    
+    // 4. Clock falling edge and recovery time
     digitalWrite(clockPin, LOW);
-    delayMicroseconds(10); // Clock recovery time
+    delayMicroseconds(12);
   }
 }
 
@@ -131,6 +145,12 @@ void setup() {
   pinMode(CLOCK_PIN, OUTPUT);
   pinMode(LATCH_PIN, OUTPUT);
   pinMode(STATUS_LED, OUTPUT);
+
+  // Set lowest drive strength (~5mA) to soften fast rising/falling edges.
+  // This drastically reduces high-frequency reflections and ringing across 8 parallel IC clock inputs.
+  gpio_set_drive_capability((gpio_num_t)DATA_PIN, GPIO_DRIVE_CAP_0);
+  gpio_set_drive_capability((gpio_num_t)CLOCK_PIN, GPIO_DRIVE_CAP_0);
+  gpio_set_drive_capability((gpio_num_t)LATCH_PIN, GPIO_DRIVE_CAP_0);
 
   Serial.begin(115200);
   allOff();
