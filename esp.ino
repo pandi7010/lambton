@@ -47,31 +47,34 @@ bool watchdogEnabled = false;        // Default to continuous hold for testing
 constexpr uint16_t WATCHDOG_MS = 250;
 
 // Shift out bits with microsecond setup and pulse times to guarantee signal integrity
-// across ESP32 240MHz GPIO slew rate and bus capacitance.
+// across ESP32 240MHz GPIO slew rate and bus capacitance across 8 ICs.
 void customShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t val) {
   for (uint8_t i = 0; i < 8; ++i) {
     bool bitVal = (bitOrder == LSBFIRST) ? (val & (1 << i)) : (val & (1 << (7 - i)));
     digitalWrite(dataPin, bitVal ? HIGH : LOW);
-    delayMicroseconds(3); // Setup time
+    delayMicroseconds(10); // Generous data setup time
     digitalWrite(clockPin, HIGH);
-    delayMicroseconds(5); // Clock HIGH pulse width
+    delayMicroseconds(12); // Clean clock pulse width
     digitalWrite(clockPin, LOW);
-    delayMicroseconds(3); // Clock LOW recovery time
+    delayMicroseconds(10); // Clock recovery time
   }
 }
 
 void writeRegisters() {
   digitalWrite(LATCH_PIN, LOW);
-  delayMicroseconds(3);
+  digitalWrite(CLOCK_PIN, LOW);
+  delayMicroseconds(5);
   // Shift from IC8 down to IC1 so the first byte shifted ends up in IC8
   for (int8_t i = NUM_ICS - 1; i >= 0; --i) {
     customShiftOut(DATA_PIN, CLOCK_PIN, MSBFIRST, outputBytes[i]);
   }
-  delayMicroseconds(3);
+  digitalWrite(DATA_PIN, LOW);
+  digitalWrite(CLOCK_PIN, LOW);
+  delayMicroseconds(10);
   digitalWrite(LATCH_PIN, HIGH);
-  delayMicroseconds(10); // Generous latch pulse width
+  delayMicroseconds(20); // Generous latch pulse width for all 8 cascaded ICs
   digitalWrite(LATCH_PIN, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(10);
 }
 
 void allOff() {
