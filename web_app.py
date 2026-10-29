@@ -1,10 +1,11 @@
 """
-ESP32 63-Channel Ejector & Indicator Tester — Web Version
-=========================================================
+ESP32 63-Channel Ejector & Indicator Tester — Web Version (WiFi + WebSocket)
+=============================================================================
 Flask web server that serves a responsive HTML UI.
-Serial communication uses the Web Serial API (Chrome/Edge on Android & Desktop).
 
-Connect ESP32 to phone via USB OTG, open Chrome, and control all 63 channels.
+Connection Modes:
+  1. WiFi WebSocket: ESP32 runs WebSocket server, browser connects via ws://
+  2. USB Serial: Web Serial API fallback (Chrome only, for USB OTG)
 
 Deploy to Render:
   - Build command: pip install -r requirements.txt
@@ -38,9 +39,7 @@ HTML_PAGE = r"""
     --on-bg: #10b981;
     --off-bg: #1e293b;
   }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
     background: var(--bg);
     color: var(--text);
@@ -108,6 +107,58 @@ HTML_PAGE = r"""
     flex-wrap: wrap;
   }
 
+  /* CONNECTION MODE SECTION */
+  .conn-section {
+    background: var(--card);
+    padding: 12px 16px;
+    border-bottom: 1px solid #1f2937;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .conn-mode-toggle {
+    display: flex;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #374151;
+  }
+  .conn-mode-toggle button {
+    background: #111827;
+    color: var(--muted);
+    border: none;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .conn-mode-toggle button.active {
+    background: var(--accent);
+    color: #0c4a6e;
+  }
+  .wifi-input-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .wifi-input-group label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .wifi-input-group input {
+    background: #0f172a;
+    border: 1px solid #374151;
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: 'Consolas', monospace;
+    width: 160px;
+  }
+  .wifi-input-group input::placeholder { color: var(--dim); }
+
   /* CONTROLS BAR */
   .controls {
     background: #1f2937;
@@ -167,9 +218,7 @@ HTML_PAGE = r"""
   }
 
   /* CHANNEL GRID */
-  .grid-section {
-    padding: 12px;
-  }
+  .grid-section { padding: 12px; }
   .grid-header {
     display: flex;
     align-items: center;
@@ -179,7 +228,6 @@ HTML_PAGE = r"""
   }
   .grid-header h2 { font-size: 14px; color: var(--text); }
   .grid-header .sub { font-size: 11px; color: var(--accent); }
-
   .active-counter {
     font-size: 13px;
     font-weight: 700;
@@ -190,7 +238,6 @@ HTML_PAGE = r"""
     margin-left: auto;
   }
 
-  /* IC Bank Layout */
   .bank-row {
     display: flex;
     gap: 4px;
@@ -255,9 +302,7 @@ HTML_PAGE = r"""
   }
 
   /* LOG PANEL */
-  .log-section {
-    padding: 8px 12px 12px;
-  }
+  .log-section { padding: 8px 12px 12px; }
   .log-header {
     display: flex;
     justify-content: space-between;
@@ -286,10 +331,8 @@ HTML_PAGE = r"""
   .log-err { color: var(--red); }
   .log-warn { color: var(--orange); }
 
-  /* WIRING REFERENCE (collapsible) */
-  .wiring-section {
-    padding: 0 12px 12px;
-  }
+  /* WIRING REFERENCE */
+  .wiring-section { padding: 0 12px 12px; }
   .wiring-toggle {
     background: var(--card2);
     color: var(--text);
@@ -316,31 +359,6 @@ HTML_PAGE = r"""
   .wire-pin { color: #cbd5e1; }
   .wire-crucial { color: #4ade80; font-weight: 700; }
 
-  /* PORT SELECTION */
-  .port-select {
-    background: var(--card);
-    padding: 12px 16px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid #1f2937;
-  }
-  .port-select label {
-    font-size: 12px;
-    color: var(--muted);
-    font-weight: 700;
-  }
-  .port-select select {
-    background: #0f172a;
-    color: var(--text);
-    border: 1px solid #374151;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 13px;
-    min-width: 140px;
-  }
-
   /* BOTTOM BAR */
   .bottom-bar {
     background: var(--card);
@@ -356,17 +374,6 @@ HTML_PAGE = r"""
   }
   .counter { color: var(--muted); font-weight: 600; }
 
-  /* WEB SERIAL NOT SUPPORTED */
-  .no-serial-warning {
-    background: #7f1d1d;
-    color: #fecaca;
-    padding: 14px 16px;
-    font-size: 13px;
-    text-align: center;
-    display: none;
-  }
-  .no-serial-warning a { color: var(--accent); }
-
   /* Responsive */
   @media (max-width: 600px) {
     .header h1 { font-size: 13px; }
@@ -375,31 +382,47 @@ HTML_PAGE = r"""
     .bank-label { min-width: 44px; font-size: 10px; }
     .controls { padding: 8px 10px; }
     .btn { padding: 6px 10px; font-size: 12px; }
+    .wifi-input-group input { width: 130px; }
   }
 </style>
 </head>
 <body>
-
-<!-- Web Serial Warning -->
-<div class="no-serial-warning" id="noSerialWarning">
-  ⚠️ Your browser does not support Web Serial API.
-  Please use <a href="https://www.google.com/chrome/" target="_blank">Google Chrome</a> (Desktop or Android with USB OTG).
-</div>
 
 <!-- HEADER -->
 <div class="header">
   <h1>⚡ ESP32 63-CH EJECTOR TESTER</h1>
   <span class="status-badge" id="statusBadge">● Disconnected</span>
   <div class="header-right">
-    <select id="baudRate" class="btn" style="background:#111827; padding:6px 10px; font-size:12px; border:1px solid #374151; border-radius:4px;">
+    <button class="btn btn-connect" id="connectBtn" onclick="toggleConnection()">🔌 Connect</button>
+    <button class="btn btn-ping" onclick="sendPing()">📡 Ping</button>
+    <button class="btn btn-test" onclick="diagTestIC1()">🔬 Test IC1</button>
+  </div>
+</div>
+
+<!-- CONNECTION MODE SECTION -->
+<div class="conn-section">
+  <div class="conn-mode-toggle">
+    <button id="modeWifi" class="active" onclick="setConnMode('wifi')">📶 WiFi</button>
+    <button id="modeUsb" onclick="setConnMode('usb')">🔌 USB Serial</button>
+  </div>
+
+  <!-- WiFi Settings -->
+  <div id="wifiSettings" class="wifi-input-group">
+    <label>ESP32 IP:</label>
+    <input type="text" id="espIp" placeholder="192.168.1.100" value="">
+    <label>Port:</label>
+    <input type="number" id="espPort" value="81" style="width:60px">
+  </div>
+
+  <!-- USB Settings (hidden by default) -->
+  <div id="usbSettings" class="wifi-input-group" style="display:none">
+    <label>Baud:</label>
+    <select id="baudRate" style="background:#0f172a;border:1px solid #374151;color:var(--text);padding:6px;border-radius:4px;font-size:13px;">
       <option value="9600">9600</option>
       <option value="57600">57600</option>
       <option value="115200" selected>115200</option>
       <option value="230400">230400</option>
     </select>
-    <button class="btn btn-connect" id="connectBtn" onclick="toggleConnection()">🔌 Connect</button>
-    <button class="btn btn-ping" onclick="sendPing()">📡 Ping</button>
-    <button class="btn btn-test" onclick="diagTestIC1()">🔬 Test IC1</button>
   </div>
 </div>
 
@@ -419,7 +442,7 @@ HTML_PAGE = r"""
     <label>Mode:</label>
     <div class="mode-toggle">
       <button id="modePulse" class="active" onclick="setMode('pulse')">Pulse</button>
-      <button id="modeToggle" onclick="setMode('toggle')">Toggle</button>
+      <button id="modeToggleBt" onclick="setMode('toggle')">Toggle</button>
     </div>
   </div>
   <div class="control-group">
@@ -477,7 +500,7 @@ HTML_PAGE = r"""
 
 <!-- BOTTOM BAR -->
 <div class="bottom-bar">
-  <span>Protocol: 'A'=ALL ON | 0=ALL OFF | 1..63=CH ON | 101..163=CH OFF @ 115200</span>
+  <span id="protocolInfo">Protocol: 'A'=ALL ON | 0=ALL OFF | 1..63=CH ON | 101..163=CH OFF</span>
   <span class="counter" id="txrxCounter">TX: 0 | RX: 0</span>
 </div>
 
@@ -496,10 +519,13 @@ const BANKS = [
   {num:8, label:'IC 8', start:57, end:63},
 ];
 
-let port = null;
-let reader = null;
-let writer = null;
+let connMode = 'wifi';  // 'wifi' or 'usb'
+let ws = null;           // WebSocket for WiFi mode
+let serialPort = null;   // Web Serial for USB mode
+let serialWriter = null;
+let serialReader = null;
 let readableStreamClosed = null;
+
 let channelStates = new Array(CHANNELS).fill(false);
 let mode = 'pulse';
 let txCount = 0, rxCount = 0;
@@ -507,27 +533,31 @@ let chaserRunning = false;
 let chaserAbort = null;
 let pulseTimers = {};
 
+// ========== CONNECTION MODE ==========
+function setConnMode(m) {
+  connMode = m;
+  document.getElementById('modeWifi').classList.toggle('active', m === 'wifi');
+  document.getElementById('modeUsb').classList.toggle('active', m === 'usb');
+  document.getElementById('wifiSettings').style.display = m === 'wifi' ? 'flex' : 'none';
+  document.getElementById('usbSettings').style.display = m === 'usb' ? 'flex' : 'none';
+}
+
 // ========== BUILD GRID ==========
 function buildGrid() {
   const grid = document.getElementById('channelGrid');
   grid.innerHTML = '';
-
   BANKS.forEach(bank => {
     const row = document.createElement('div');
     row.className = 'bank-row';
-
-    // Bank label button
     const bankBtn = document.createElement('div');
     bankBtn.className = 'bank-label';
     bankBtn.innerHTML = `${bank.label}<br>Test`;
     bankBtn.onclick = () => testBank(bank.num);
     row.appendChild(bankBtn);
 
-    // Channel buttons
     for (let pin = 0; pin < 8; pin++) {
       const ch = bank.start + pin;
       const btn = document.createElement('button');
-
       if (ch <= CHANNELS) {
         btn.className = 'ch-btn';
         btn.id = `ch-${ch}`;
@@ -540,131 +570,167 @@ function buildGrid() {
       }
       row.appendChild(btn);
     }
-
     grid.appendChild(row);
   });
 }
 
-// ========== WEB SERIAL ==========
+// ========== CONNECTION ==========
 async function toggleConnection() {
-  if (port) {
-    await disconnect();
+  if (connMode === 'wifi') {
+    ws ? disconnectWifi() : connectWifi();
   } else {
-    await connect();
+    serialPort ? await disconnectUsb() : await connectUsb();
   }
 }
 
-async function connect() {
-  try {
-    if (!('serial' in navigator)) {
-      logMsg('Web Serial API not supported in this browser!', 'err');
-      return;
+// ----- WiFi WebSocket -----
+function connectWifi() {
+  const ip = document.getElementById('espIp').value.trim();
+  const port = document.getElementById('espPort').value.trim();
+  if (!ip) {
+    logMsg('Enter the ESP32 IP address first!', 'err');
+    return;
+  }
+
+  const url = `ws://${ip}:${port}`;
+  logMsg(`Connecting to ${url}...`, 'sys');
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    logMsg(`WebSocket connected to ${url}`, 'sys');
+    updateConnUI(true, `WiFi: ${ip}`);
+  };
+
+  ws.onmessage = (event) => {
+    const msg = event.data.trim();
+    if (msg) {
+      rxCount++;
+      updateCounters();
+      logMsg(msg, 'rx');
     }
+  };
 
-    port = await navigator.serial.requestPort();
-    const baudRate = parseInt(document.getElementById('baudRate').value);
-    await port.open({ baudRate: baudRate });
+  ws.onerror = (err) => {
+    logMsg('WebSocket error — check IP and ensure ESP32 is on same network', 'err');
+  };
 
-    writer = port.writable.getWriter();
-
-    // Start reading
-    startReading();
-
-    // Update UI
-    document.getElementById('connectBtn').textContent = '⛔ Disconnect';
-    document.getElementById('connectBtn').classList.add('active');
-    const badge = document.getElementById('statusBadge');
-    badge.textContent = '● Connected';
-    badge.classList.add('connected');
-
-    logMsg(`Connected at ${baudRate} baud`, 'sys');
-
-    // Wait for ESP32 boot, then send ping
-    await sleep(1200);
-    await sendByte(0x50, 'PING (P)');  // 'P'
-
-  } catch (err) {
-    port = null;
-    logMsg(`Connection failed: ${err.message}`, 'err');
-  }
+  ws.onclose = () => {
+    logMsg('WebSocket disconnected', 'sys');
+    ws = null;
+    updateConnUI(false);
+  };
 }
 
-async function disconnect() {
+function disconnectWifi() {
   chaserRunning = false;
   if (chaserAbort) chaserAbort.abort();
-
-  try {
-    // Send ALL OFF before disconnecting
-    if (writer) {
-      try { await writer.write(new Uint8Array([0])); } catch(e) {}
-      writer.releaseLock();
-      writer = null;
-    }
-
-    if (reader) {
-      try { await reader.cancel(); } catch(e) {}
-      reader = null;
-    }
-
-    if (readableStreamClosed) {
-      try { await readableStreamClosed; } catch(e) {}
-      readableStreamClosed = null;
-    }
-
-    if (port) {
-      try { await port.close(); } catch(e) {}
-      port = null;
-    }
-  } catch(e) {}
-
-  // Reset UI
-  document.getElementById('connectBtn').textContent = '🔌 Connect';
-  document.getElementById('connectBtn').classList.remove('active');
-  const badge = document.getElementById('statusBadge');
-  badge.textContent = '● Disconnected';
-  badge.classList.remove('connected');
-
+  if (ws) {
+    try { ws.send(new Uint8Array([0])); } catch(e) {}  // ALL OFF
+    ws.close();
+    ws = null;
+  }
+  updateConnUI(false);
   for (let ch = 1; ch <= CHANNELS; ch++) setVisual(ch, false);
-
-  logMsg('Disconnected', 'sys');
 }
 
-async function startReading() {
-  const decoder = new TextDecoderStream();
-  readableStreamClosed = port.readable.pipeTo(decoder.writable);
-  reader = decoder.readable.getReader();
+// ----- USB Web Serial -----
+async function connectUsb() {
+  try {
+    if (!('serial' in navigator)) {
+      logMsg('Web Serial API not supported — use Chrome!', 'err');
+      return;
+    }
+    serialPort = await navigator.serial.requestPort();
+    const baudRate = parseInt(document.getElementById('baudRate').value);
+    await serialPort.open({ baudRate });
+    serialWriter = serialPort.writable.getWriter();
+    startSerialReading();
+    updateConnUI(true, 'USB Serial');
+    logMsg(`USB Serial connected at ${baudRate} baud`, 'sys');
+    await sleep(1200);
+    await sendByte(0x50, 'PING (P)');
+  } catch (err) {
+    serialPort = null;
+    logMsg(`USB connection failed: ${err.message}`, 'err');
+  }
+}
 
+async function disconnectUsb() {
+  chaserRunning = false;
+  if (chaserAbort) chaserAbort.abort();
+  try {
+    if (serialWriter) {
+      try { await serialWriter.write(new Uint8Array([0])); } catch(e) {}
+      serialWriter.releaseLock();
+      serialWriter = null;
+    }
+    if (serialReader) { try { await serialReader.cancel(); } catch(e) {} serialReader = null; }
+    if (readableStreamClosed) { try { await readableStreamClosed; } catch(e) {} readableStreamClosed = null; }
+    if (serialPort) { try { await serialPort.close(); } catch(e) {} serialPort = null; }
+  } catch(e) {}
+  updateConnUI(false);
+  for (let ch = 1; ch <= CHANNELS; ch++) setVisual(ch, false);
+  logMsg('USB disconnected', 'sys');
+}
+
+function startSerialReading() {
+  const decoder = new TextDecoderStream();
+  readableStreamClosed = serialPort.readable.pipeTo(decoder.writable);
+  serialReader = decoder.readable.getReader();
   (async () => {
     try {
       while (true) {
-        const { value, done } = await reader.read();
+        const { value, done } = await serialReader.read();
         if (done) break;
         if (value) {
-          const lines = value.split('\n');
-          lines.forEach(line => {
+          value.split('\n').forEach(line => {
             line = line.trim();
-            if (line) {
-              rxCount++;
-              updateCounters();
-              logMsg(line, 'rx');
-            }
+            if (line) { rxCount++; updateCounters(); logMsg(line, 'rx'); }
           });
         }
       }
     } catch (err) {
-      if (port) logMsg(`Read error: ${err.message}`, 'err');
+      if (serialPort) logMsg(`Read error: ${err.message}`, 'err');
     }
   })();
 }
 
+function updateConnUI(connected, label) {
+  const btn = document.getElementById('connectBtn');
+  const badge = document.getElementById('statusBadge');
+  if (connected) {
+    btn.textContent = '⛔ Disconnect';
+    btn.classList.add('active');
+    badge.textContent = `● ${label || 'Connected'}`;
+    badge.classList.add('connected');
+  } else {
+    btn.textContent = '🔌 Connect';
+    btn.classList.remove('active');
+    badge.textContent = '● Disconnected';
+    badge.classList.remove('connected');
+  }
+}
+
+function isConnected() {
+  return (connMode === 'wifi' && ws && ws.readyState === WebSocket.OPEN) ||
+         (connMode === 'usb' && serialWriter);
+}
+
+// ========== SEND ==========
 async function sendByte(value, description) {
-  if (!writer) {
+  if (!isConnected()) {
     logMsg('Not connected', 'err');
     return false;
   }
 
   try {
-    await writer.write(new Uint8Array([value]));
+    const data = new Uint8Array([value]);
+    if (connMode === 'wifi') {
+      ws.send(data);
+    } else {
+      await serialWriter.write(data);
+    }
     txCount++;
     updateCounters();
 
@@ -684,7 +750,6 @@ function setVisual(ch, on) {
   channelStates[ch - 1] = on;
   const btn = document.getElementById(`ch-${ch}`);
   if (!btn) return;
-
   const pinName = PIN_NAMES[(ch - 1) % 8];
   if (on) {
     btn.classList.add('on');
@@ -693,7 +758,6 @@ function setVisual(ch, on) {
     btn.classList.remove('on');
     btn.innerHTML = `<span class="ch-num">CH ${String(ch).padStart(2,'0')}</span><span class="ch-state">${pinName}: OFF</span>`;
   }
-
   const activeCount = channelStates.filter(s => s).length;
   document.getElementById('activeCounter').textContent = `Active: ${activeCount} / ${CHANNELS}`;
 }
@@ -702,8 +766,7 @@ async function channelClick(ch) {
   if (mode === 'toggle') {
     const newState = !channelStates[ch - 1];
     const cmdByte = newState ? ch : ch + 100;
-    const desc = `CH ${ch} ${newState ? 'ON' : 'OFF'} (Toggle)`;
-    if (await sendByte(cmdByte, desc)) {
+    if (await sendByte(cmdByte, `CH ${ch} ${newState ? 'ON' : 'OFF'} (Toggle)`)) {
       setVisual(ch, newState);
     }
   } else {
@@ -713,16 +776,9 @@ async function channelClick(ch) {
 
 async function pulseChannel(ch) {
   const duration = Math.max(10, parseInt(document.getElementById('pulseMs').value) || 150);
-
-  // Cancel existing pulse timer for this channel
-  if (pulseTimers[ch]) {
-    clearTimeout(pulseTimers[ch]);
-    delete pulseTimers[ch];
-  }
-
+  if (pulseTimers[ch]) { clearTimeout(pulseTimers[ch]); delete pulseTimers[ch]; }
   if (!await sendByte(ch, `CH ${ch} ON (Pulse ${duration}ms)`)) return;
   setVisual(ch, true);
-
   pulseTimers[ch] = setTimeout(async () => {
     await sendByte(ch + 100, `CH ${ch} OFF`);
     setVisual(ch, false);
@@ -738,20 +794,17 @@ function fireSelected() {
 function setMode(m) {
   mode = m;
   document.getElementById('modePulse').classList.toggle('active', m === 'pulse');
-  document.getElementById('modeToggle').classList.toggle('active', m === 'toggle');
+  document.getElementById('modeToggleBt').classList.toggle('active', m === 'toggle');
 }
 
-// ========== ALL ON / ALL OFF ==========
+// ========== ALL ON / OFF ==========
 async function allOnContinuous() {
-  if (!writer) { logMsg('Not connected', 'err'); return; }
+  if (!isConnected()) { logMsg('Not connected', 'err'); return; }
   chaserRunning = false;
   if (chaserAbort) chaserAbort.abort();
-
-  // Clear all pulse timers
   Object.keys(pulseTimers).forEach(ch => clearTimeout(pulseTimers[ch]));
   pulseTimers = {};
-
-  if (await sendByte(0x41, 'ALL 63 CHANNELS ON (Continuous)')) {  // 'A'
+  if (await sendByte(0x41, 'ALL 63 CHANNELS ON (Continuous)')) {
     for (let ch = 1; ch <= CHANNELS; ch++) setVisual(ch, true);
     logMsg('ALL 63 CHANNELS COMMANDED CONTINUOUSLY ON', 'warn');
   }
@@ -760,31 +813,24 @@ async function allOnContinuous() {
 async function allOff() {
   chaserRunning = false;
   if (chaserAbort) chaserAbort.abort();
-
-  // Clear all pulse timers
   Object.keys(pulseTimers).forEach(ch => clearTimeout(pulseTimers[ch]));
   pulseTimers = {};
-
   await sendByte(0, 'ALL OFF (Stop Signal)');
   for (let ch = 1; ch <= CHANNELS; ch++) setVisual(ch, false);
   logMsg('ALL OFF — all 63 channels commanded OFF', 'sys');
 }
 
-// ========== BANK TEST ==========
+// ========== BANK TEST & CHASER ==========
 async function testBank(bankNum) {
-  if (!writer) { logMsg('Not connected', 'err'); return; }
+  if (!isConnected()) { logMsg('Not connected', 'err'); return; }
   if (chaserRunning) { logMsg('Chaser running — stop it first', 'warn'); return; }
-
   const bank = BANKS.find(b => b.num === bankNum);
   if (!bank) return;
-
   chaserRunning = true;
   chaserAbort = new AbortController();
   logMsg(`Testing ${bank.label} (CH ${String(bank.start).padStart(2,'0')}-${String(bank.end).padStart(2,'0')})`, 'sys');
-
   const pulse = Math.max(10, parseInt(document.getElementById('pulseMs').value) || 150);
   const gap = Math.max(10, parseInt(document.getElementById('gapMs').value) || 80);
-
   try {
     for (let ch = bank.start; ch <= bank.end; ch++) {
       if (!chaserRunning) break;
@@ -796,16 +842,12 @@ async function testBank(bankNum) {
       if (ch < bank.end) await abortableSleep(gap, chaserAbort.signal);
     }
   } catch(e) {}
-
   chaserRunning = false;
   logMsg(`Bank ${bankNum} test completed`, 'sys');
 }
 
-function testSelectedBank() {
-  testBank(parseInt(document.getElementById('bankSelect').value));
-}
+function testSelectedBank() { testBank(parseInt(document.getElementById('bankSelect').value)); }
 
-// ========== CHASER ==========
 async function toggleChaser() {
   if (chaserRunning) {
     chaserRunning = false;
@@ -819,17 +861,14 @@ async function toggleChaser() {
 }
 
 async function startChaser() {
-  if (!writer) { logMsg('Not connected', 'err'); return; }
-
+  if (!isConnected()) { logMsg('Not connected', 'err'); return; }
   chaserRunning = true;
   chaserAbort = new AbortController();
   document.getElementById('chaserBtn').textContent = '⏹ STOP';
   document.getElementById('chaserBtn').style.background = '#ea580c';
   logMsg('Sequential 1-63 Chaser started', 'sys');
-
   const pulse = Math.max(10, parseInt(document.getElementById('pulseMs').value) || 150);
   const gap = Math.max(10, parseInt(document.getElementById('gapMs').value) || 80);
-
   try {
     for (let ch = 1; ch <= CHANNELS; ch++) {
       if (!chaserRunning) break;
@@ -841,7 +880,6 @@ async function startChaser() {
       if (ch < CHANNELS) await abortableSleep(gap, chaserAbort.signal);
     }
   } catch(e) {}
-
   chaserRunning = false;
   document.getElementById('chaserBtn').textContent = '🔄 RUN 1-63';
   document.getElementById('chaserBtn').style.background = '#0d9488';
@@ -849,12 +887,9 @@ async function startChaser() {
 }
 
 // ========== COMMANDS ==========
-async function sendPing() {
-  await sendByte(0x50, 'STATUS PING (P)');  // 'P'
-}
-
+async function sendPing() { await sendByte(0x50, 'STATUS PING (P)'); }
 async function diagTestIC1() {
-  if (await sendByte(0x54, 'DIAGNOSTIC TEST (IC1 CH 01-08 ON)')) {  // 'T'
+  if (await sendByte(0x54, 'DIAGNOSTIC TEST (IC1 CH 01-08 ON)')) {
     for (let ch = 1; ch <= 8; ch++) setVisual(ch, true);
   }
 }
@@ -864,45 +899,24 @@ function logMsg(message, tag) {
   const box = document.getElementById('logBox');
   const time = new Date().toTimeString().split(' ')[0];
   const ms = String(new Date().getMilliseconds()).padStart(3, '0');
-  const stamp = `${time}.${ms}`;
-
-  const tagUpper = tag.toUpperCase();
   const entry = document.createElement('div');
   entry.className = 'log-entry';
-  entry.innerHTML = `<span class="log-time">[${stamp}]</span> <span class="log-${tag}">[${tagUpper}] ${escapeHtml(message)}</span>`;
+  entry.innerHTML = `<span class="log-time">[${time}.${ms}]</span> <span class="log-${tag}">[${tag.toUpperCase()}] ${escapeHtml(message)}</span>`;
   box.appendChild(entry);
   box.scrollTop = box.scrollHeight;
-
-  // Keep log manageable (max 200 entries)
   while (box.children.length > 200) box.removeChild(box.firstChild);
 }
 
-function clearLog() {
-  document.getElementById('logBox').innerHTML = '';
-}
-
-function escapeHtml(text) {
-  const d = document.createElement('div');
-  d.textContent = text;
-  return d.innerHTML;
-}
-
-function updateCounters() {
-  document.getElementById('txrxCounter').textContent = `TX: ${txCount} | RX: ${rxCount}`;
-}
+function clearLog() { document.getElementById('logBox').innerHTML = ''; }
+function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function updateCounters() { document.getElementById('txrxCounter').textContent = `TX: ${txCount} | RX: ${rxCount}`; }
 
 // ========== UTILITIES ==========
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function abortableSleep(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
+    signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted','AbortError')); }, {once:true});
   });
 }
 
@@ -910,13 +924,17 @@ function abortableSleep(ms, signal) {
 document.addEventListener('DOMContentLoaded', () => {
   buildGrid();
 
-  // Check Web Serial API support
-  if (!('serial' in navigator)) {
-    document.getElementById('noSerialWarning').style.display = 'block';
-    logMsg('Web Serial API not available. Use Chrome (Desktop or Android).', 'err');
-  } else {
-    logMsg('Web Serial API available. Click Connect and select your ESP32.', 'sys');
-  }
+  // Try to load saved ESP32 IP from localStorage
+  const savedIp = localStorage.getItem('esp32_ip');
+  if (savedIp) document.getElementById('espIp').value = savedIp;
+
+  // Save IP on change
+  document.getElementById('espIp').addEventListener('change', (e) => {
+    localStorage.setItem('esp32_ip', e.target.value.trim());
+  });
+
+  logMsg('Ready! Select WiFi or USB mode, then click Connect.', 'sys');
+  logMsg('WiFi: Enter ESP32 IP address (shown in Serial Monitor after upload)', 'sys');
 });
 </script>
 </body>
