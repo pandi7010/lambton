@@ -35,48 +35,50 @@
       (Search "WebSockets" by Links2004)
 */
 
-#include <Arduino.h>
-#include <WiFi.h>
-#include <WebSocketsServer.h>
 #include "driver/gpio.h"
+#include <Arduino.h>
+#include <WebSocketsServer.h>
+#include <WiFi.h>
 
 // ============================================================
 // >>>  CHANGE THESE TO YOUR WiFi CREDENTIALS  <<<
 // ============================================================
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // <-- Your WiFi name
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";   // <-- Your WiFi password
+const char *WIFI_SSID = "PANDISELVAM RAMARAJ"; // <-- Your WiFi name
+const char *WIFI_PASSWORD = "pandi7010";       // <-- Your WiFi password
 // ============================================================
 
 // Pin Configuration (unchanged)
-constexpr uint8_t DATA_PIN   = 13;
-constexpr uint8_t LATCH_PIN  = 12;
-constexpr uint8_t CLOCK_PIN  = 14;
+constexpr uint8_t DATA_PIN = 13;
+constexpr uint8_t LATCH_PIN = 12;
+constexpr uint8_t CLOCK_PIN = 14;
 constexpr uint8_t STATUS_LED = 2;
 
-constexpr uint8_t NUM_ICS      = 8;
+constexpr uint8_t NUM_ICS = 8;
 constexpr uint8_t NUM_CHANNELS = 63;
 
 // State
-uint8_t  outputBytes[NUM_ICS]       = {0};
-bool     active[NUM_CHANNELS + 1]   = {false};
-uint32_t onSince[NUM_CHANNELS + 1]  = {0};
-bool     watchdogEnabled            = false;
-constexpr uint16_t WATCHDOG_MS      = 250;
+uint8_t outputBytes[NUM_ICS] = {0};
+bool active[NUM_CHANNELS + 1] = {false};
+uint32_t onSince[NUM_CHANNELS + 1] = {0};
+bool watchdogEnabled = false;
+constexpr uint16_t WATCHDOG_MS = 250;
 
 // WebSocket server on port 81
 WebSocketsServer webSocket(81);
 
 // Track connected WebSocket clients for broadcasting responses
-void broadcastMessage(const String& msg) {
+void broadcastMessage(String msg) {
   webSocket.broadcastTXT(msg);
-  Serial.println(msg);  // Also echo to serial for debugging
+  Serial.println(msg); // Also echo to serial for debugging
 }
 
 // ========== SHIFT REGISTER FUNCTIONS (identical to esp.ino) ==========
 
-void customShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t val) {
+void customShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder,
+                    uint8_t val) {
   for (uint8_t i = 0; i < 8; ++i) {
-    bool bitVal = (bitOrder == LSBFIRST) ? (val & (1 << i)) : (val & (1 << (7 - i)));
+    bool bitVal =
+        (bitOrder == LSBFIRST) ? (val & (1 << i)) : (val & (1 << (7 - i)));
     digitalWrite(dataPin, bitVal ? HIGH : LOW);
     delayMicroseconds(10);
     digitalWrite(clockPin, HIGH);
@@ -105,7 +107,8 @@ void writeRegisters() {
 }
 
 void allOff() {
-  for (uint8_t i = 0; i < NUM_ICS; ++i) outputBytes[i] = 0;
+  for (uint8_t i = 0; i < NUM_ICS; ++i)
+    outputBytes[i] = 0;
   for (uint8_t ch = 1; ch <= NUM_CHANNELS; ++ch) {
     active[ch] = false;
     onSince[ch] = 0;
@@ -115,8 +118,9 @@ void allOff() {
 }
 
 void allOn() {
-  for (uint8_t i = 0; i < NUM_ICS - 1; ++i) outputBytes[i] = 0xFF;
-  outputBytes[7] = 0x7F;  // CH 57-63 ON, CH 64 reserved
+  for (uint8_t i = 0; i < NUM_ICS - 1; ++i)
+    outputBytes[i] = 0xFF;
+  outputBytes[7] = 0x7F; // CH 57-63 ON, CH 64 reserved
   for (uint8_t ch = 1; ch <= NUM_CHANNELS; ++ch) {
     active[ch] = true;
     onSince[ch] = millis();
@@ -126,17 +130,18 @@ void allOn() {
 }
 
 void setChannel(uint8_t ch, bool on) {
-  if (ch < 1 || ch > NUM_CHANNELS) return;
+  if (ch < 1 || ch > NUM_CHANNELS)
+    return;
   const uint8_t idx = ch - 1;
-  const uint8_t ic  = idx / 8;
+  const uint8_t ic = idx / 8;
   const uint8_t bit = idx % 8;
   if (on) {
     outputBytes[ic] |= uint8_t(1U << bit);
-    active[ch]  = true;
+    active[ch] = true;
     onSince[ch] = millis();
   } else {
     outputBytes[ic] &= uint8_t(~(1U << bit));
-    active[ch]  = false;
+    active[ch] = false;
     onSince[ch] = 0;
   }
 }
@@ -151,41 +156,34 @@ void processCommand(uint8_t b) {
     digitalWrite(STATUS_LED, HIGH);
     delay(30);
     digitalWrite(STATUS_LED, LOW);
-  }
-  else if (b == 'A') {
+  } else if (b == 'A') {
     watchdogEnabled = false;
     allOn();
     broadcastMessage("ACK: ALL 63 ON (CONTINUOUS)");
-  }
-  else if (b == 0 || b == 'R' || b == 'S') {
+  } else if (b == 0 || b == 'R' || b == 'S') {
     allOff();
     broadcastMessage("ACK: ALL OFF");
-  }
-  else if (b == 'W') {
+  } else if (b == 'W') {
     watchdogEnabled = true;
     broadcastMessage("ACK: WATCHDOG ENABLED (250MS AUTO-OFF)");
-  }
-  else if (b == 'X') {
+  } else if (b == 'X') {
     watchdogEnabled = false;
     broadcastMessage("ACK: WATCHDOG DISABLED (CONTINUOUS HOLD)");
-  }
-  else if (b == 'T') {
-    for (uint8_t ch = 1; ch <= 8; ++ch) setChannel(ch, true);
+  } else if (b == 'T') {
+    for (uint8_t ch = 1; ch <= 8; ++ch)
+      setChannel(ch, true);
     changed = true;
     broadcastMessage("ACK: DIAGNOSTIC TEST - IC1 (CH 01-08) ON");
-  }
-  else if (b >= 1 && b <= NUM_CHANNELS) {
+  } else if (b >= 1 && b <= NUM_CHANNELS) {
     setChannel(b, true);
     changed = true;
     broadcastMessage("ACK: CH " + String(b) + " ON");
-  }
-  else if (b >= 101 && b <= 100 + NUM_CHANNELS) {
+  } else if (b >= 101 && b <= 100 + NUM_CHANNELS) {
     uint8_t ch = b - 100;
     setChannel(ch, false);
     changed = true;
     broadcastMessage("ACK: CH " + String(ch) + " OFF");
-  }
-  else if (b != '\r' && b != '\n' && b != ' ') {
+  } else if (b != '\r' && b != '\n' && b != ' ') {
     broadcastMessage("WARN: UNKNOWN CMD " + String(b));
   }
 
@@ -193,7 +191,10 @@ void processCommand(uint8_t b) {
     writeRegisters();
     bool anyActive = false;
     for (uint8_t ch = 1; ch <= NUM_CHANNELS; ++ch) {
-      if (active[ch]) { anyActive = true; break; }
+      if (active[ch]) {
+        anyActive = true;
+        break;
+      }
     }
     digitalWrite(STATUS_LED, anyActive ? HIGH : LOW);
   }
@@ -201,36 +202,36 @@ void processCommand(uint8_t b) {
 
 // ========== WEBSOCKET EVENT HANDLER ==========
 
-void webSocketEvent(uint8_t clientNum, WStype_t type, uint8_t* payload, size_t length) {
+void webSocketEvent(uint8_t clientNum, WStype_t type, uint8_t *payload,
+                    size_t length) {
   switch (type) {
-    case WStype_DISCONNECTED:
-      Serial.printf("[WS] Client #%u disconnected\n", clientNum);
-      break;
+  case WStype_DISCONNECTED:
+    Serial.printf("[WS] Client #%u disconnected\n", clientNum);
+    break;
 
-    case WStype_CONNECTED:
-      {
-        IPAddress ip = webSocket.remoteIP(clientNum);
-        Serial.printf("[WS] Client #%u connected from %s\n", clientNum, ip.toString().c_str());
-        webSocket.sendTXT(clientNum, "ACK: ESP32_WIFI_CONNECTED");
-      }
-      break;
+  case WStype_CONNECTED: {
+    IPAddress ip = webSocket.remoteIP(clientNum);
+    Serial.printf("[WS] Client #%u connected from %s\n", clientNum,
+                  ip.toString().c_str());
+    webSocket.sendTXT(clientNum, "ACK: ESP32_WIFI_CONNECTED");
+  } break;
 
-    case WStype_TEXT:
-      // Text commands: process first byte
-      if (length > 0) {
-        processCommand(payload[0]);
-      }
-      break;
+  case WStype_TEXT:
+    // Text commands: process first byte
+    if (length > 0) {
+      processCommand(payload[0]);
+    }
+    break;
 
-    case WStype_BIN:
-      // Binary commands: process each byte
-      for (size_t i = 0; i < length; i++) {
-        processCommand(payload[i]);
-      }
-      break;
+  case WStype_BIN:
+    // Binary commands: process each byte
+    for (size_t i = 0; i < length; i++) {
+      processCommand(payload[i]);
+    }
+    break;
 
-    default:
-      break;
+  default:
+    break;
   }
 }
 
@@ -248,7 +249,7 @@ void setup() {
   pinMode(LATCH_PIN, OUTPUT);
   pinMode(STATUS_LED, OUTPUT);
 
-  gpio_set_drive_capability((gpio_num_t)DATA_PIN,  GPIO_DRIVE_CAP_0);
+  gpio_set_drive_capability((gpio_num_t)DATA_PIN, GPIO_DRIVE_CAP_0);
   gpio_set_drive_capability((gpio_num_t)CLOCK_PIN, GPIO_DRIVE_CAP_0);
   gpio_set_drive_capability((gpio_num_t)LATCH_PIN, GPIO_DRIVE_CAP_0);
 
@@ -329,7 +330,10 @@ void loop() {
       writeRegisters();
       bool anyActive = false;
       for (uint8_t ch = 1; ch <= NUM_CHANNELS; ++ch) {
-        if (active[ch]) { anyActive = true; break; }
+        if (active[ch]) {
+          anyActive = true;
+          break;
+        }
       }
       digitalWrite(STATUS_LED, anyActive ? HIGH : LOW);
     }
